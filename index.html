@@ -357,8 +357,11 @@
     <button class="add-set-btn" id="add-set-btn">+ Ajouter la série</button>
 
     <div class="sets-list" id="sets-list"></div>
-
+    <button class="add-set-btn" id="add-exercise-btn" disabled>+ Ajouter cet exercice à la séance</button>
+    <div class="label" style="margin-top:22px">Exercices de la séance</div>
+    <div class="sets-list" id="exercises-list"></div>
     <button class="save-entry-btn" id="save-entry-btn" disabled>Enregistrer la séance</button>
+    <button class="add-set-btn" id="cancel-edit-btn" style="display:none;margin-top:10px">Annuler la modification</button>
   </main>
 
   <main id="tab-history">
@@ -383,245 +386,37 @@
 </div>
 
 <script>
-const STORAGE_KEY = 'fonte-workout-log';
-let log = [];
-let currentSets = [];
-
-const $ = (id) => document.getElementById(id);
-
-function loadLog(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    log = raw ? JSON.parse(raw) : [];
-  }catch(e){
-    log = [];
-  }
-  renderMachinesList();
-  renderHistory();
+const STORAGE_KEY='fonte-workout-log';
+let log=[], currentSets=[], currentExercises=[], editingId=null;
+const $=id=>document.getElementById(id);
+function escapeHtml(str){const d=document.createElement('div');d.textContent=str;return d.innerHTML;}
+function showToast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
+function saveLog(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(log));}catch(e){showToast('Erreur de sauvegarde');}}
+function loadLog(){try{log=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');}catch(e){log=[];}
+  // Migration automatique de l'ancien format: une ancienne entrée devient une séance à un exercice.
+  log=log.map(x=>x.exercises?x:{id:x.id,timestamp:x.timestamp,dateISO:x.dateISO,exercises:[{machine:x.machine,sets:x.sets||[]} ]});
+  saveLog(); renderMachinesList(); renderHistory();
 }
-
-function saveLog(){
-  try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(log));
-  }catch(e){
-    showToast("Erreur de sauvegarde, réessaie");
-  }
-}
-
-function showToast(msg){
-  const t = $('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(()=> t.classList.remove('show'), 1800);
-}
-
-/* Install banner (hide if already standalone, or if closed before) */
-(function initBanner(){
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  const dismissed = localStorage.getItem('fonte-banner-dismissed') === '1';
-  if(!isStandalone && !dismissed){
-    $('install-banner').classList.add('show');
-  }
-  $('close-banner').addEventListener('click', ()=>{
-    $('install-banner').classList.remove('show');
-    localStorage.setItem('fonte-banner-dismissed', '1');
-  });
-})();
-
-/* Tabs */
-document.querySelectorAll('.tab-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('main').forEach(m=>m.classList.remove('active'));
-    btn.classList.add('active');
-    $('tab-' + btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab === 'history') renderHistory();
-  });
-});
-function goToLogTab(){
-  document.querySelector('.tab-btn[data-tab="log"]').click();
-}
-
-/* Set building */
-function renderSets(){
-  const container = $('sets-list');
-  container.innerHTML = '';
-  currentSets.forEach((s, i)=>{
-    const chip = document.createElement('div');
-    chip.className = 'set-chip';
-    chip.innerHTML = `
-      <div class="num">${i+1}</div>
-      <div class="data">${s.reps} reps ${s.weight != null ? `<span class="w">· ${s.weight} kg</span>` : ''}</div>
-      <button class="rm" data-i="${i}">✕</button>
-    `;
-    container.appendChild(chip);
-  });
-  container.querySelectorAll('.rm').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      currentSets.splice(parseInt(btn.dataset.i), 1);
-      renderSets();
-      updateSaveBtn();
-    });
-  });
-}
-
-function updateSaveBtn(){
-  const machine = $('machine-input').value.trim();
-  $('save-entry-btn').disabled = !(machine.length > 0 && currentSets.length > 0);
-}
-
-$('add-set-btn').addEventListener('click', ()=>{
-  const repsVal = $('reps-input').value;
-  const weightVal = $('weight-input').value;
-  const reps = parseInt(repsVal);
-  if(!reps || reps <= 0){
-    $('reps-input').focus();
-    return;
-  }
-  const weight = weightVal !== '' ? parseFloat(weightVal) : null;
-  currentSets.push({reps, weight});
-  renderSets();
-  updateSaveBtn();
-  $('reps-input').select();
-});
-
-$('machine-input').addEventListener('input', updateSaveBtn);
-
-$('save-entry-btn').addEventListener('click', ()=>{
-  const machine = $('machine-input').value.trim();
-  if(!machine || currentSets.length === 0) return;
-  const now = new Date();
-  const entry = {
-    id: now.getTime().toString(),
-    machine,
-    timestamp: now.getTime(),
-    dateISO: now.toISOString(),
-    sets: currentSets.slice()
-  };
-  log.push(entry);
-  saveLog();
-  showToast('Séance enregistrée ✓');
-
-  currentSets = [];
-  $('machine-input').value = '';
-  $('reps-input').value = '';
-  $('weight-input').value = '';
-  renderSets();
-  updateSaveBtn();
-  renderMachinesList();
-});
-
-function renderMachinesList(){
-  const names = [...new Set(log.map(e => e.machine))].sort();
-  const dl = $('machines-list');
-  dl.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join('');
-}
-
-/* History */
-function escapeHtml(str){
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
-}
-
-function formatDateHeading(ts){
-  const d = new Date(ts);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  const sameDay = (a,b) => a.toDateString() === b.toDateString();
-  if(sameDay(d, today)) return "Aujourd'hui";
-  if(sameDay(d, yesterday)) return "Hier";
-  return d.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-}
-
-function renderHistory(){
-  const container = $('history-content');
-  const filter = ($('search-input').value || '').trim().toLowerCase();
-
-  const filtered = log
-    .filter(e => !filter || e.machine.toLowerCase().includes(filter))
-    .sort((a,b) => b.timestamp - a.timestamp);
-
-  if(filtered.length === 0){
-    container.innerHTML = `
-      <div class="empty-state">
-        <svg class="plate-logo" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="19" fill="none" stroke="#E8481C" stroke-width="3"/>
-          <circle cx="20" cy="20" r="12" fill="none" stroke="#E8481C" stroke-width="2.5"/>
-          <circle cx="20" cy="20" r="4" fill="#E8481C"/>
-        </svg>
-        <p>${log.length === 0 ? "Aucune séance enregistrée pour l'instant.<br>Ta première séance apparaîtra ici." : "Aucun résultat pour cette recherche."}</p>
-        ${log.length === 0 ? '<button class="empty-cta" id="empty-cta">Commencer une séance</button>' : ''}
-      </div>
-    `;
-    const cta = $('empty-cta');
-    if(cta) cta.addEventListener('click', goToLogTab);
-    return;
-  }
-
-  const groups = [];
-  let lastKey = null;
-  filtered.forEach(entry=>{
-    const key = new Date(entry.timestamp).toDateString();
-    if(key !== lastKey){
-      groups.push({key, heading: formatDateHeading(entry.timestamp), entries:[]});
-      lastKey = key;
-    }
-    groups[groups.length-1].entries.push(entry);
-  });
-
-  container.innerHTML = groups.map(g => `
-    <div class="date-group">
-      <div class="date-heading">${g.heading}</div>
-      ${g.entries.map(e => entryCardHtml(e)).join('')}
-    </div>
-  `).join('');
-
-  container.querySelectorAll('.entry-head').forEach(head=>{
-    head.addEventListener('click', ()=>{
-      head.closest('.entry-card').classList.toggle('open');
-    });
-  });
-  container.querySelectorAll('.del-entry').forEach(btn=>{
-    btn.addEventListener('click', (ev)=>{
-      ev.stopPropagation();
-      const id = btn.dataset.id;
-      log = log.filter(e => e.id !== id);
-      saveLog();
-      renderMachinesList();
-      renderHistory();
-    });
-  });
-}
-
-function entryCardHtml(e){
-  const totalReps = e.sets.reduce((sum,s)=> sum + s.reps, 0);
-  return `
-    <div class="entry-card">
-      <div class="entry-head">
-        <div>
-          <div class="entry-title">${escapeHtml(e.machine)}</div>
-          <div class="entry-meta">${totalReps} répétitions au total</div>
-        </div>
-        <div class="entry-right">
-          <div class="entry-badge">${e.sets.length} série${e.sets.length > 1 ? 's' : ''}</div>
-          <div class="chevron">▾</div>
-        </div>
-      </div>
-      <div class="entry-detail">
-        <div class="detail-sets">
-          ${e.sets.map((s,i)=> `<div class="detail-set">S${i+1} · ${s.reps} reps${s.weight != null ? ` <span class="w">· ${s.weight}kg</span>` : ''}</div>`).join('')}
-        </div>
-        <button class="del-entry" data-id="${e.id}">Supprimer cette séance</button>
-      </div>
-    </div>
-  `;
-}
-
-$('search-input').addEventListener('input', renderHistory);
-
-loadLog();
+(function(){const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;const dismissed=localStorage.getItem('fonte-banner-dismissed')==='1';if(!standalone&&!dismissed)$('install-banner').classList.add('show');$('close-banner').onclick=()=>{$('install-banner').classList.remove('show');localStorage.setItem('fonte-banner-dismissed','1');};})();
+document.querySelectorAll('.tab-btn').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.querySelectorAll('main').forEach(m=>m.classList.remove('active'));btn.classList.add('active');$('tab-'+btn.dataset.tab).classList.add('active');if(btn.dataset.tab==='history')renderHistory();});
+function goToLogTab(){document.querySelector('.tab-btn[data-tab="log"]').click();}
+function renderSets(){const c=$('sets-list');c.innerHTML=currentSets.map((s,i)=>`<div class="set-chip"><div class="num">${i+1}</div><div class="data">${s.reps} reps ${s.weight!=null?`<span class="w">· ${s.weight} kg</span>`:''}</div><button class="rm" data-i="${i}">✕</button></div>`).join('');c.querySelectorAll('.rm').forEach(b=>b.onclick=()=>{currentSets.splice(+b.dataset.i,1);renderSets();updateButtons();});}
+function renderExercises(){const c=$('exercises-list');if(!currentExercises.length){c.innerHTML='<div style="color:var(--text-faint);font-size:14px">Aucun exercice ajouté.</div>';return;}c.innerHTML=currentExercises.map((e,i)=>`<div class="set-chip"><div class="num">${i+1}</div><div class="data"><b>${escapeHtml(e.machine)}</b><br><span style="font-size:12px">${e.sets.length} série${e.sets.length>1?'s':''}</span></div><button class="rm" data-i="${i}">✕</button></div>`).join('');c.querySelectorAll('.rm').forEach(b=>b.onclick=()=>{currentExercises.splice(+b.dataset.i,1);renderExercises();updateButtons();});}
+function updateButtons(){const machine=$('machine-input').value.trim();$('add-exercise-btn').disabled=!(machine&&currentSets.length);$('save-entry-btn').disabled=!currentExercises.length;}
+$('add-set-btn').onclick=()=>{const reps=parseInt($('reps-input').value), w=$('weight-input').value;if(!reps||reps<=0){$('reps-input').focus();return;}currentSets.push({reps,weight:w!==''?parseFloat(w):null});renderSets();updateButtons();$('reps-input').select();};
+$('machine-input').oninput=updateButtons;
+$('add-exercise-btn').onclick=()=>{const machine=$('machine-input').value.trim();if(!machine||!currentSets.length)return;currentExercises.push({machine,sets:currentSets.map(x=>({...x}))});currentSets=[];$('machine-input').value='';$('reps-input').value='';$('weight-input').value='';renderSets();renderExercises();updateButtons();renderMachinesList();showToast('Exercice ajouté ✓');};
+function resetForm(){currentSets=[];currentExercises=[];editingId=null;$('machine-input').value='';$('reps-input').value='';$('weight-input').value='';$('save-entry-btn').textContent='Enregistrer la séance';$('cancel-edit-btn').style.display='none';renderSets();renderExercises();updateButtons();}
+$('save-entry-btn').onclick=()=>{if(!currentExercises.length)return;const now=Date.now();if(editingId){const idx=log.findIndex(x=>x.id===editingId);if(idx>=0)log[idx]={...log[idx],exercises:currentExercises.map(e=>({machine:e.machine,sets:e.sets.map(s=>({...s}))}))};showToast('Séance modifiée ✓');}else{log.push({id:String(now),timestamp:now,dateISO:new Date(now).toISOString(),exercises:currentExercises.map(e=>({machine:e.machine,sets:e.sets.map(s=>({...s}))}))});showToast('Séance enregistrée ✓');}saveLog();resetForm();renderMachinesList();renderHistory();};
+$('cancel-edit-btn').onclick=resetForm;
+function editSession(id){const e=log.find(x=>x.id===id);if(!e)return;editingId=id;currentExercises=e.exercises.map(x=>({machine:x.machine,sets:x.sets.map(s=>({...s}))}));currentSets=[];$('save-entry-btn').textContent='Enregistrer les modifications';$('cancel-edit-btn').style.display='block';renderSets();renderExercises();updateButtons();goToLogTab();showToast('Séance chargée pour modification');}
+function renderMachinesList(){const names=[...new Set(log.flatMap(s=>s.exercises||[]).map(e=>e.machine).concat(currentExercises.map(e=>e.machine)))].sort();$('machines-list').innerHTML=names.map(n=>`<option value="${escapeHtml(n)}">`).join('');}
+function formatDateHeading(ts){const d=new Date(ts),t=new Date(),y=new Date();y.setDate(t.getDate()-1);const same=(a,b)=>a.toDateString()===b.toDateString();if(same(d,t))return "Aujourd'hui";if(same(d,y))return 'Hier';return d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
+function recordsHtml(){const rec={};log.forEach(s=>(s.exercises||[]).forEach(e=>e.sets.forEach(set=>{if(set.weight!=null&&(!rec[e.machine]||set.weight>rec[e.machine]))rec[e.machine]=set.weight;})));const rows=Object.entries(rec).sort((a,b)=>a[0].localeCompare(b[0]));if(!rows.length)return '';return `<div class="date-group"><div class="date-heading">🏆 Records de poids</div>${rows.map(([m,w])=>`<div class="set-chip"><div class="data"><b>${escapeHtml(m)}</b></div><div class="w" style="margin-left:auto;font-weight:700">${w} kg</div></div>`).join('')}</div>`;}
+function renderHistory(){const c=$('history-content'),f=($('search-input').value||'').trim().toLowerCase();const filtered=log.filter(s=>!f||(s.exercises||[]).some(e=>e.machine.toLowerCase().includes(f))).sort((a,b)=>b.timestamp-a.timestamp);if(!filtered.length){c.innerHTML=recordsHtml()+`<div class="empty-state"><p>${log.length?'Aucun résultat pour cette recherche.':'Aucune séance enregistrée pour l\'instant.'}</p></div>`;return;}const groups=[];filtered.forEach(e=>{const key=new Date(e.timestamp).toDateString();let g=groups.find(x=>x.key===key);if(!g){g={key,heading:formatDateHeading(e.timestamp),entries:[]};groups.push(g);}g.entries.push(e);});c.innerHTML=recordsHtml()+groups.map(g=>`<div class="date-group"><div class="date-heading">${g.heading}</div>${g.entries.map(entryCardHtml).join('')}</div>`).join('');c.querySelectorAll('.entry-head').forEach(h=>h.onclick=()=>h.closest('.entry-card').classList.toggle('open'));c.querySelectorAll('.edit-entry').forEach(b=>b.onclick=ev=>{ev.stopPropagation();editSession(b.dataset.id);});c.querySelectorAll('.del-entry').forEach(b=>b.onclick=ev=>{ev.stopPropagation();if(confirm('Supprimer cette séance ?')){log=log.filter(e=>e.id!==b.dataset.id);saveLog();renderMachinesList();renderHistory();}});}
+function entryCardHtml(e){const ex=e.exercises||[];const totalSets=ex.reduce((n,x)=>n+x.sets.length,0);return `<div class="entry-card"><div class="entry-head"><div><div class="entry-title">${ex.length} exercice${ex.length>1?'s':''}</div><div class="entry-meta">${totalSets} séries au total</div></div><div class="entry-right"><div class="entry-badge">${ex.length} ex.</div><div class="chevron">▾</div></div></div><div class="entry-detail"><div class="detail-sets">${ex.map(x=>`<div style="margin-bottom:12px"><b>${escapeHtml(x.machine)}</b>${x.sets.map((s,i)=>`<div class="detail-set">S${i+1} · ${s.reps} reps${s.weight!=null?` <span class="w">· ${s.weight}kg</span>`:''}</div>`).join('')}</div>`).join('')}</div><button class="add-set-btn edit-entry" data-id="${e.id}" style="margin-top:10px">Modifier cette séance</button><button class="del-entry" data-id="${e.id}">Supprimer cette séance</button></div></div>`;}
+$('search-input').oninput=renderHistory;
+renderExercises();loadLog();
 </script>
 </body>
 </html>
