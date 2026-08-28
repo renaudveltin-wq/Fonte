@@ -412,8 +412,29 @@ $('cancel-edit-btn').onclick=resetForm;
 function editSession(id){const e=log.find(x=>x.id===id);if(!e)return;editingId=id;currentExercises=e.exercises.map(x=>({machine:x.machine,sets:x.sets.map(s=>({...s}))}));currentSets=[];$('save-entry-btn').textContent='Enregistrer les modifications';$('cancel-edit-btn').style.display='block';renderSets();renderExercises();updateButtons();goToLogTab();showToast('Séance chargée pour modification');}
 function renderMachinesList(){const names=[...new Set(log.flatMap(s=>s.exercises||[]).map(e=>e.machine).concat(currentExercises.map(e=>e.machine)))].sort();$('machines-list').innerHTML=names.map(n=>`<option value="${escapeHtml(n)}">`).join('');}
 function formatDateHeading(ts){const d=new Date(ts),t=new Date(),y=new Date();y.setDate(t.getDate()-1);const same=(a,b)=>a.toDateString()===b.toDateString();if(same(d,t))return "Aujourd'hui";if(same(d,y))return 'Hier';return d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
-function isAssistedExercise(name){const n=(name||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');return n.includes('dip assist')||n.includes('dips assist')||n.includes('chin assist');}
-function recordsHtml(){const rec={};log.forEach(s=>(s.exercises||[]).forEach(e=>e.sets.forEach(set=>{if(set.weight==null)return;const assisted=isAssistedExercise(e.machine);if(rec[e.machine]==null||(assisted?set.weight<rec[e.machine]:set.weight>rec[e.machine]))rec[e.machine]=set.weight;})));const rows=Object.entries(rec).sort((a,b)=>a[0].localeCompare(b[0]));if(!rows.length)return '';return `<div class="date-group"><div class="date-heading">🏆 Records de poids</div>${rows.map(([m,w])=>`<div class="set-chip"><div class="data"><b>${escapeHtml(m)}</b>${isAssistedExercise(m)?'<div style="font-size:11px;opacity:.65;margin-top:2px">moins d’assistance = meilleur record</div>':''}</div><div class="w" style="margin-left:auto;font-weight:700">${w} kg</div></div>`).join('')}</div>`;}
+function normalizeExerciseName(name){return (name||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');}
+function isAssistedExercise(name){const n=normalizeExerciseName(name);return n.includes('dip assist')||n.includes('dips assist')||n.includes('chin assist');}
+function isPushUpExercise(name){const n=normalizeExerciseName(name);return n.includes('pompe');}
+function recordsHtml(){
+  const rec={};
+  log.forEach(s=>(s.exercises||[]).forEach(e=>e.sets.forEach(set=>{
+    const key=e.machine;
+    if(isPushUpExercise(key)){
+      if(rec[key]==null||set.reps>rec[key].value)rec[key]={value:set.reps,type:'reps'};
+      return;
+    }
+    if(set.weight==null)return;
+    const assisted=isAssistedExercise(key);
+    if(rec[key]==null||(assisted?set.weight<rec[key].value:set.weight>rec[key].value))rec[key]={value:set.weight,type:'weight'};
+  })));
+  const rows=Object.entries(rec).sort((a,b)=>a[0].localeCompare(b[0]));
+  if(!rows.length)return '';
+  return `<div class="date-group"><div class="date-heading">🏆 Records</div>${rows.map(([m,r])=>{
+    const note=isPushUpExercise(m)?'<div style="font-size:11px;opacity:.65;margin-top:2px">record = maximum de répétitions sur une série</div>':(isAssistedExercise(m)?'<div style="font-size:11px;opacity:.65;margin-top:2px">moins d’assistance = meilleur record</div>':'');
+    const display=r.type==='reps'?`${r.value} reps`:`${r.value} kg`;
+    return `<div class="set-chip"><div class="data"><b>${escapeHtml(m)}</b>${note}</div><div class="w" style="margin-left:auto;font-weight:700">${display}</div></div>`;
+  }).join('')}</div>`;
+}
 function renderHistory(){const c=$('history-content'),f=($('search-input').value||'').trim().toLowerCase();const filtered=log.filter(s=>!f||(s.exercises||[]).some(e=>e.machine.toLowerCase().includes(f))).sort((a,b)=>b.timestamp-a.timestamp);if(!filtered.length){c.innerHTML=recordsHtml()+`<div class="empty-state"><p>${log.length?'Aucun résultat pour cette recherche.':'Aucune séance enregistrée pour l\'instant.'}</p></div>`;return;}const groups=[];filtered.forEach(e=>{const key=new Date(e.timestamp).toDateString();let g=groups.find(x=>x.key===key);if(!g){g={key,heading:formatDateHeading(e.timestamp),entries:[]};groups.push(g);}g.entries.push(e);});c.innerHTML=recordsHtml()+groups.map(g=>`<div class="date-group"><div class="date-heading">${g.heading}</div>${g.entries.map(entryCardHtml).join('')}</div>`).join('');c.querySelectorAll('.entry-head').forEach(h=>h.onclick=()=>h.closest('.entry-card').classList.toggle('open'));c.querySelectorAll('.edit-entry').forEach(b=>b.onclick=ev=>{ev.stopPropagation();editSession(b.dataset.id);});c.querySelectorAll('.del-entry').forEach(b=>b.onclick=ev=>{ev.stopPropagation();if(confirm('Supprimer cette séance ?')){log=log.filter(e=>e.id!==b.dataset.id);saveLog();renderMachinesList();renderHistory();}});}
 function entryCardHtml(e){const ex=e.exercises||[];const totalSets=ex.reduce((n,x)=>n+x.sets.length,0);return `<div class="entry-card"><div class="entry-head"><div><div class="entry-title">${ex.length} exercice${ex.length>1?'s':''}</div><div class="entry-meta">${totalSets} séries au total</div></div><div class="entry-right"><div class="entry-badge">${ex.length} ex.</div><div class="chevron">▾</div></div></div><div class="entry-detail"><div class="detail-sets">${ex.map(x=>`<div style="margin-bottom:12px"><b>${escapeHtml(x.machine)}</b>${x.sets.map((s,i)=>`<div class="detail-set">S${i+1} · ${s.reps} reps${s.weight!=null?` <span class="w">· ${s.weight}kg</span>`:''}</div>`).join('')}</div>`).join('')}</div><button class="add-set-btn edit-entry" data-id="${e.id}" style="margin-top:10px">Modifier cette séance</button><button class="del-entry" data-id="${e.id}">Supprimer cette séance</button></div></div>`;}
 $('search-input').oninput=renderHistory;
